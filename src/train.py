@@ -362,7 +362,7 @@ class ProjectAgent:
         print(f"Model saved to {os.path.join(path, 'model.pth')}")
 
     def load(self):
-        file_path =  'mva-rl-assignment-Antoinelunven/src/policy/model_128_lr.pth'
+        file_path =  '/mva-rl-assignment-Antoinelunven/src/policy/model_128_lr.pth'
 
         # file_path = "mva-rl-assignment-Antoinelunven/src/policy/model_128_lr.pth"
         # file_path = os.path.join(os.getcwd(), 'src\\policy', 'model_128_lr.pth')
