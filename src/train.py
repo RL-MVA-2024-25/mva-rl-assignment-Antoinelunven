@@ -363,7 +363,7 @@ class ProjectAgent:
 
     def load(self):
         # file_path =  '/mva-rl-assignment-Antoinelunven/src/policy/model_128_lr.pth'
-        file_path = os.path.join(os.getcwd(), 'mva-rl-assignment-Antoinelunven/src/policy', 'model_128_lr.pth')
+        file_path = os.path.join(os.getcwd(), 'src/policy', 'model_128_lr.pth')
         
         # file_path = os.path.join(os.getcwd(), 'src\\policy', 'model_128_lr.pth')
         print(file_path)
