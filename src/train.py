@@ -10,8 +10,9 @@ from copy import deepcopy
 import time
 # import matplotlib.pyplot as plt
 from evaluate import evaluate_HIV, evaluate_HIV_population
+import torch.profiler
 
-
+import torch.multiprocessing as mp
 
 class LSTMunit(nn.Module):
     def __init__(self, batch, hidden, input, device):
@@ -104,20 +105,24 @@ class SignalLSTM(nn.Module):
 
     
 class DQN(nn.Module):
-    def __init__(self, input=6, output=4):
+    def __init__(self, input=6, output=4, layer = 256):
         super(DQN, self).__init__()
         self.fc = nn.Sequential(
-            nn.Linear(input, 16),
+            nn.Linear(input, layer),
             nn.ReLU(),
-            nn.Linear(16, 128),
+            nn.Linear(layer, layer),
             nn.ReLU(),
-            nn.Linear(128, 128),
+            nn.Linear(layer, layer),
             nn.ReLU(),
-            nn.Linear(128, 128),
+            # nn.Linear(layer, layer),
+            # nn.ReLU(),
+            nn.Linear(layer, layer),
             nn.ReLU(),
-            nn.Linear(128, 16),
+            nn.Linear(layer, layer),
             nn.ReLU(),
-            nn.Linear(16, output))
+            nn.Linear(layer, layer),
+            nn.ReLU(),
+            nn.Linear(layer, output))
 
 
         # Apply weight initialization
@@ -197,13 +202,15 @@ class ReplayBuffer:
     def __len__(self):
         return len(self.data)
 
-env = TimeLimit(env=HIVPatient(domain_randomization=True), max_episode_steps=200)  
+env = TimeLimit(env=HIVPatient(domain_randomization=False), max_episode_steps=200)  
 # The time wrapper limits the number of steps in an episode at 200.
 # Now is the floor is yours to implement the agent and train it.
 
 # You have to implement your own agent.
 # Don't modify the methods names and signatures, but you can add methods.
 # ENJOY!
+def gradient_step_wrapper(agent):
+    agent.gradient_step()
 class ProjectAgent:
     config = {
           'learning_rate': 0.001,
@@ -215,13 +222,14 @@ class ProjectAgent:
           'epsilon_delay_decay': 100,
           'batch_size': 700,
           'max_episode': 200,
-          'nb_gradient_steps' : 1,
+          'max_gradient_steps' : 8,
+          'epsilon_seuil' : 0.2,
           'udpate_target_freq' : 400}
     dqn_network = DQN()
     # dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # dqn_network = LSTMunit(input_size = env.observation_space.shape[0], hidden_size = 200, num_layers= 1, device=dev)
-    def __init__(self):
-        
+    def __init__(self):        
+        # self.device = torch.device("cpu")   
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.model_policy = self.dqn_network.to(self.device)
@@ -237,10 +245,13 @@ class ProjectAgent:
         self.epsilon_delay = self.config['epsilon_delay_decay']
         self.update_target_frequency = self.config['udpate_target_freq']
         self.epsilon_step = (self.epsilon_max-self.epsilon_min)/self.epsilon_stop
-        self.nb_gradient_steps = self.config['nb_gradient_steps']
+        self.max_gradient_steps = self.config['max_gradient_steps']
         self.criterion = torch.nn.SmoothL1Loss()
         self.optimizer = torch.optim.Adam(self.model_policy.parameters(), lr= self.lr)
-
+        self.epsilon_seuil = self.config["epsilon_seuil"]
+        self.gradient_time  = 0
+        self.sampling_time = 0
+        self.episode_time = 0
 
     def greedy_action(self, observation):
         observation = torch.Tensor(observation).unsqueeze(0).to(self.device)
@@ -274,21 +285,35 @@ class ProjectAgent:
     #         self.optimizer.step() 
 
     def gradient_step(self): #, step, episode
-        if len(self.memory) > self.batch_size:
-        # if (len(self.memory) > self.batch_size and episode ==0) or (episode >=1 and len(self.memory) > 200*(episode)  + self.batch_size):
+# if (len(self.memory) > self.batch_size and episode ==0) or (episode >=1 and len(self.memory) > 200*(episode)  + self.batch_size):
+        start_sampling = time.time()
+        X, A, R, Y, D = self.memory.sample(self.batch_size) # , step, episode
+        X, A, R, Y, D = X.to(self.device), A.to(self.device), R.to(self.device), Y.to(self.device), D.to(self.device)
 
-            X, A, R, Y, D = self.memory.sample(self.batch_size) # , step, episode
-            QYmax = self.model_target(Y).max(1)[0].detach()
-            #update = torch.addcmul(R, self.gamma, 1-D, QYmax)
-            update = torch.addcmul(R, 1-D, QYmax, value=self.gamma)
-            QXA = self.model_policy(X).gather(1, A.to(torch.long).unsqueeze(1))
-            loss = self.criterion(QXA, update.unsqueeze(1))
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step() 
+        self.sampling_time += time.time() - start_sampling
+
+        
+        QYmax = self.model_target(Y).max(1)[0].detach()
+        #update = torch.addcmul(R, self.gamma, 1-D, QYmax)
+        update = torch.addcmul(R, 1-D, QYmax, value=self.gamma)
+        QXA = self.model_policy(X).gather(1, A.to(torch.long).unsqueeze(1))
+        loss = self.criterion(QXA, update.unsqueeze(1))
+        start_gradient = time.time()
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step() 
+        self.gradient_time += time.time() - start_gradient
     def update_learning_rate(self, optimizer, new_lr):
         for param_group in optimizer.param_groups:
             param_group['lr'] = new_lr
+
+    def nb_gradient_steps(self, epsilon):
+        if epsilon > self.epsilon_seuil:
+            # Scale gradient steps proportionally to epsilon
+            return int(1 + (self.max_gradient_steps) * (1 - (epsilon - self.epsilon_seuil)/(1 - self.epsilon_seuil)))
+        if epsilon <= self.epsilon_seuil:
+            # Scale gradient steps proportionally to epsilon
+            return int(1 + (self.max_gradient_steps) * ((epsilon - self.epsilon_min)/(self.epsilon_seuil - self.epsilon_min)))
 
     def train(self, env):
         episode = 0
@@ -299,7 +324,13 @@ class ProjectAgent:
         episode_cum_reward = 0
         best_score = 0
         compteur_lr = 0
+        current_episode = 0
+        env_duration = 0
+        
         while episode < self.max_episode:
+            if episode !=0:
+                if trunc == True :
+                    self.episode_time = time.time()
             # Update epsilon
             if step > self.epsilon_delay:
                 epsilon = max(self.epsilon_min, epsilon - self.epsilon_step)
@@ -309,21 +340,31 @@ class ProjectAgent:
                 action = self.act(state, False) # Exploitation
 
             # Step
+            env_start = time.time()
             next_state, reward, done, trunc, _ = env.step(action)
+            env_duration += time.time() - env_start
             self.memory.append(state, action, reward, next_state, trunc) # ,episode
+            
                                                                           
             episode_cum_reward += reward
             # Train
+            nb_gradient_steps = self.nb_gradient_steps(epsilon)
+            if len(self.memory) > self.batch_size:
+                streams = [torch.cuda.Stream() for _ in range(nb_gradient_steps)]
 
-            for _ in range(self.nb_gradient_steps): 
-                self.gradient_step() # , step, episode
-                # self.gradient_step()
+                for i, stream in enumerate(streams):
+                    with torch.cuda.stream(stream):
+                        self.gradient_step()
+                torch.cuda.synchronize()  # Ensure all streams complete
+
 
             if step % self.update_target_frequency  == 0:
                 self.model_target.load_state_dict(self.model_policy.state_dict())
 
-            if epsilon == self.epsilon_min:
-                if compteur_lr == 5:
+            if epsilon == self.epsilon_min and current_episode != episode:
+                current_episode = episode
+                if compteur_lr == 7:
+                    compteur_lr = 0
                     self.lr = self.lr/2
                     print("New lr : ", self.lr)
                     self.update_learning_rate(self.optimizer, self.lr)
@@ -335,9 +376,17 @@ class ProjectAgent:
                 print(f"Episode {episode} | ", 
                       f"Epsilon {epsilon:6.4f} | ", 
                     #   ", batch size ", '{:5d}'.format(len(self.memory[episode-1])), 
-                      f"Episode return {episode_cum_reward:.2e}",
+                      f"Episode return {episode_cum_reward:.2e} | ",
+                      f"Gradient time {self.gradient_time:1.1f} | ",
+                      f"Sampling time {self.sampling_time:1.1f} | ",
+                      f"Step time {env_duration:1.1f} | ",
+                      f"Episode time {(time.time() - self.episode_time):1.1f} | ",
+                      f"Gradient steps {nb_gradient_steps}",
                     #   ", validation score ", '{:4.1f}'.format(validation_score),
                       sep='')
+                self.gradient_time = 0
+                self.sampling_time = 0
+                env_duration = 0
                 state, _ = env.reset()
                 episode_return.append(episode_cum_reward)
                 
@@ -363,7 +412,7 @@ class ProjectAgent:
 
     def load(self):
         # file_path =  '/mva-rl-assignment-Antoinelunven/src/policy/model_128_lr.pth'
-        file_path = os.path.join(os.getcwd(), 'src/policy', 'model_128_lr.pth')
+        file_path = os.path.join(os.getcwd(), 'src/policy', 'new_lr.pth')
         
         # file_path = os.path.join(os.getcwd(), 'src\\policy', 'model_128_lr.pth')
         print(file_path)
