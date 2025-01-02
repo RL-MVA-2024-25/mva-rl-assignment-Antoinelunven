@@ -1,5 +1,6 @@
 from gymnasium.wrappers import TimeLimit
 from env_hiv import HIVPatient
+from fast_env import FastHIVPatient
 import random
 import torch
 import torch.nn as nn
@@ -10,7 +11,7 @@ from copy import deepcopy
 import time
 # import matplotlib.pyplot as plt
 from evaluate import evaluate_HIV, evaluate_HIV_population
-import torch.profiler
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 import torch.multiprocessing as mp
 
@@ -114,8 +115,10 @@ class DQN(nn.Module):
             nn.ReLU(),
             nn.Linear(layer, layer),
             nn.ReLU(),
-            # nn.Linear(layer, layer),
-            # nn.ReLU(),
+            nn.Linear(layer, layer),
+            nn.ReLU(),
+            nn.Linear(layer, layer),
+            nn.ReLU(),
             nn.Linear(layer, layer),
             nn.ReLU(),
             nn.Linear(layer, layer),
@@ -142,48 +145,6 @@ class DQN(nn.Module):
                 nn.init.kaiming_uniform_(layer.weight, nonlinearity='relu')
                 if layer.bias is not None:
                     nn.init.zeros_(layer.bias)
-    
-# class ReplayBuffer:
-#     def __init__(self, capacity, device, max_episode):
-#         self.capacity = int(capacity)  # Capacity of the buffer
-#         self.data = []
-#         self.index = 0  # Index of the next cell to be filled
-#         self.device = device
-#         self.max_episode = max_episode
-
-#     def append(self, s, a, r, s_, d, episode):
-#         # Convert all inputs to tensors and move them to the target device
-#         s = torch.tensor(s, dtype=torch.float32, device=self.device)
-#         a = torch.tensor(a, dtype=torch.long, device=self.device)
-#         r = torch.tensor(r, dtype=torch.float32, device=self.device)
-#         s_ = torch.tensor(s_, dtype=torch.float32, device=self.device)
-#         d = torch.tensor(d, dtype=torch.float32, device=self.device)  # Done is float for 1 - d calculation
-#         if len(self.data) < self.capacity:
-#             self.data.append(None)
-#         self.data[self.index] = (s, a, r, s_, d)
-#         self.index = (self.index + 1) % self.capacity
-
-#     def sample(self, batch_size, step, episode):
-#         low_step, high_step, step_data = [], [], []
-#         if episode >=1:
-#             low_step.append(step -1 - (200*episode + batch_size))
-#             high_step.append(low_step[-1] + batch_size)
-#         else:
-#             low_step.append(step-1-batch_size)
-#             high_step.append(step-1)
-#         for i in range(episode):
-#             low_step.append(low_step[-1] + 200)
-#             high_step.append(high_step[-1] + 200)
-#         # print("high, low, step", low_step, high_step, step)
-#         step_data = [self.data[low:high] for low, high in zip(low_step, high_step)]
-#         flat_step_data = [item for sublist in step_data for item in sublist]
-#         # Randomly sample `batch_size` transitions from step_data
-#         batch = random.sample(flat_step_data, batch_size)
-#         # No need to move to device again; they are already on the correct device
-#         return tuple(map(torch.stack, zip(*batch)))
-
-#     def __len__(self):
-#         return len(self.data)
 
 class ReplayBuffer:
     def __init__(self, capacity, device):
@@ -203,14 +164,15 @@ class ReplayBuffer:
         return len(self.data)
 
 env = TimeLimit(env=HIVPatient(domain_randomization=False), max_episode_steps=200)  
+# env = TimeLimit(env=FastHIVPatient(domain_randomization=False), max_episode_steps=200)  
+
 # The time wrapper limits the number of steps in an episode at 200.
 # Now is the floor is yours to implement the agent and train it.
 
 # You have to implement your own agent.
 # Don't modify the methods names and signatures, but you can add methods.
 # ENJOY!
-def gradient_step_wrapper(agent):
-    agent.gradient_step()
+
 class ProjectAgent:
     config = {
           'learning_rate': 0.001,
@@ -218,12 +180,12 @@ class ProjectAgent:
           'buffer_size': 1000000,
           'epsilon_min': 0.02,
           'epsilon_max': 1,
-          'epsilon_decay_period': 21000,
-          'epsilon_delay_decay': 100,
+          'epsilon_decay_period': 35000,
+          'epsilon_delay_decay': 200,
           'batch_size': 700,
-          'max_episode': 200,
+          'max_episode': 400,
           'max_gradient_steps' : 8,
-          'epsilon_seuil' : 0.2,
+          'epsilon_seuil' : 0.25,
           'udpate_target_freq' : 400}
     dqn_network = DQN()
     # dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -249,6 +211,7 @@ class ProjectAgent:
         self.criterion = torch.nn.SmoothL1Loss()
         self.optimizer = torch.optim.Adam(self.model_policy.parameters(), lr= self.lr)
         self.epsilon_seuil = self.config["epsilon_seuil"]
+        self.scheduler  = ReduceLROnPlateau(self.optimizer, mode='max', factor=0.5, patience=7, verbose= True)
         self.gradient_time  = 0
         self.sampling_time = 0
         self.episode_time = 0
@@ -288,13 +251,16 @@ class ProjectAgent:
 # if (len(self.memory) > self.batch_size and episode ==0) or (episode >=1 and len(self.memory) > 200*(episode)  + self.batch_size):
         start_sampling = time.time()
         X, A, R, Y, D = self.memory.sample(self.batch_size) # , step, episode
-        X, A, R, Y, D = X.to(self.device), A.to(self.device), R.to(self.device), Y.to(self.device), D.to(self.device)
+        X, A, R, Y, D = X.to(self.device, non_blocking=True), \
+                            A.to(self.device, non_blocking=True), \
+                            R.to(self.device, non_blocking=True), \
+                            Y.to(self.device, non_blocking=True), \
+                            D.to(self.device, non_blocking=True)
 
         self.sampling_time += time.time() - start_sampling
 
         
         QYmax = self.model_target(Y).max(1)[0].detach()
-        #update = torch.addcmul(R, self.gamma, 1-D, QYmax)
         update = torch.addcmul(R, 1-D, QYmax, value=self.gamma)
         QXA = self.model_policy(X).gather(1, A.to(torch.long).unsqueeze(1))
         loss = self.criterion(QXA, update.unsqueeze(1))
@@ -307,13 +273,23 @@ class ProjectAgent:
         for param_group in optimizer.param_groups:
             param_group['lr'] = new_lr
 
+# Custom function for scaling learning rate
+    
     def nb_gradient_steps(self, epsilon):
-        if epsilon > self.epsilon_seuil:
-            # Scale gradient steps proportionally to epsilon
-            return int(1 + (self.max_gradient_steps) * (1 - (epsilon - self.epsilon_seuil)/(1 - self.epsilon_seuil)))
-        if epsilon <= self.epsilon_seuil:
-            # Scale gradient steps proportionally to epsilon
-            return int(1 + (self.max_gradient_steps) * ((epsilon - self.epsilon_min)/(self.epsilon_seuil - self.epsilon_min)))
+        k = 3  # Adjust scaling factor for exponential steepness
+        min_steps = 1  # Minimum number of gradient steps
+        max_steps = self.max_gradient_steps  # Maximum number of gradient steps
+        if epsilon >0.6:
+            return 1
+
+        elif epsilon > self.epsilon_seuil:
+            # Exponential growth
+            scale = np.exp(-k * (epsilon - self.epsilon_seuil) / (1 - self.epsilon_seuil))
+        else:
+            # Exponential decay
+            scale = 1- np.exp(-k * (epsilon - self.epsilon_min) / (self.epsilon_seuil - self.epsilon_min))
+        # Map scale to gradient steps
+        return int(min_steps + (max_steps - min_steps) * scale)
 
     def train(self, env):
         episode = 0
@@ -323,12 +299,11 @@ class ProjectAgent:
         step = 1
         episode_cum_reward = 0
         best_score = 0
-        compteur_lr = 0
-        current_episode = 0
         env_duration = 0
+        compteur_stop = 0
         
         while episode < self.max_episode:
-            if episode !=0:
+            if episode != 0:
                 if trunc == True :
                     self.episode_time = time.time()
             # Update epsilon
@@ -357,20 +332,19 @@ class ProjectAgent:
                         self.gradient_step()
                 torch.cuda.synchronize()  # Ensure all streams complete
 
+            if epsilon < self.epsilon_seuil and trunc == True:
+                if compteur_stop == 12:
+                    return episode_return
+                if best_score == episode_cum_reward:
+                    compteur_stop +=1
+                else:
+                    compteur_stop = 0
+                self.scheduler.step(best_score)
 
             if step % self.update_target_frequency  == 0:
                 self.model_target.load_state_dict(self.model_policy.state_dict())
 
-            if epsilon == self.epsilon_min and current_episode != episode:
-                current_episode = episode
-                if compteur_lr == 7:
-                    compteur_lr = 0
-                    self.lr = self.lr/2
-                    print("New lr : ", self.lr)
-                    self.update_learning_rate(self.optimizer, self.lr)
-                compteur_lr +=1
-            if done or trunc : 
-                
+            if done or trunc :           
                 # validation_score = evaluate_HIV(agent=self.model_policy, nb_episode=1)
                 episode += 1
                 print(f"Episode {episode} | ", 
@@ -392,7 +366,6 @@ class ProjectAgent:
                 
                 if episode_cum_reward > best_score:
                     best_score = episode_cum_reward
-                    # self.best_model = deepcopy(self.model_policy).to(self.device)
                     self.save("policy")
                 episode_cum_reward = 0
 
