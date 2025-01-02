@@ -8,7 +8,7 @@ import torch.nn.functional as F
 import os
 from copy import deepcopy
 import time
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 from evaluate import evaluate_HIV, evaluate_HIV_population
 
 
@@ -350,8 +350,8 @@ class ProjectAgent:
             else:
                 state = next_state
             step += 1
-            if episode % 20 == 0:
-                plt.semilogy(episode_return)
+            # if episode % 20 == 0:
+            #     plt.semilogy(episode_return)
         print("best score", best_score)
         return episode_return
 
