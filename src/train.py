@@ -369,7 +369,7 @@ class ProjectAgent:
         print(file_path)
         # model_path = os.path.join(path, "model.pth")
         # print(model_path)
-        self.model_policy.load_state_dict(torch.load(file_path))
+        self.model_policy.load_state_dict(torch.load(file_path, map_location=torch.device('cpu')))
         self.model_policy.eval()
         print(f"Model loaded from {file_path}")
         return 
