@@ -68,7 +68,7 @@ def _der(state, action, params):
 def _transition(state, action, params, duration=5.0, step_size=1e-3):
     """Faster transition function using numba."""
     state0 = state.copy()
-    nb_steps = int(duration / step_size)
+    nb_steps = int(duration // step_size)
 
     for _ in range(nb_steps):
         der = _der(state0, action, params)
