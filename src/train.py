@@ -377,6 +377,8 @@ class ProjectAgent:
         self.epsilon  = self.epsilon_max
         self.step = 1
         self.gradient_steps = 0
+        self.var = 0
+        self.mu = 0
         self.previous_best = 0
         self.episode_seuil += self.explore_episodes
 
@@ -403,7 +405,9 @@ class ProjectAgent:
         # print("mu", mu.cpu().detach().numpy())
         # print("std", (torch.randn_like(mu) * std).cpu().detach().numpy())
         # print('Q sample', Q_sample.cpu().detach().numpy())
-        return torch.argmax(Q_sample).item(), torch.mean(std), torch.mean(mu)
+        self.var = torch.mean(std)
+        self.mu = torch.mean(mu)
+        return torch.argmax(Q_sample).item()
     
     def act(self, observation, use_random=False):
         if self.deterministic == True:
@@ -418,10 +422,10 @@ class ProjectAgent:
         else:
             if self.gradient_steps == 0:
                 action = env.action_space.sample()
-                return action, torch.tensor(0, device=self.device, dtype=torch.float32), torch.tensor(0, device=self.device, dtype=torch.float32)
+                return action
             else:
-                action, var, mu = self.Bayesian_TS(observation)
-                return action, var, mu 
+                action = self.Bayesian_TS(observation)
+                return action  
         
     def gradient_step(self, double_dqn): #, step, episode
         start_sampling = time.perf_counter()
@@ -524,8 +528,7 @@ class ProjectAgent:
         
         cumulated_var = 0
         cumulated_mu = 0
-        var = 0
-        mu = 0
+
 
         state = np.sign(state)*np.log(1+np.abs(state))
 
@@ -539,7 +542,7 @@ class ProjectAgent:
             if self.deterministic == True:
                 action = self.act(state)
             else:
-                action, var, mu = self.act(state)
+                action = self.act(state)
             
             # Step
             
@@ -550,8 +553,8 @@ class ProjectAgent:
             env_duration += time.perf_counter() - env_start
             episode_cum_reward += reward
             
-            cumulated_var += var
-            cumulated_mu += mu
+            cumulated_var += self.var
+            cumulated_mu += self.mu
             # Train
             if trunc == True:
                 self.gradient_steps_calculation(episode)
