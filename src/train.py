@@ -120,20 +120,20 @@ class Deterministic_DQN(nn.Module):
             nn.ReLU(),
             nn.Linear(layer, layer),
             nn.ReLU(),
-            nn.Dropout(p=0.2),
+            # nn.Dropout(p=0.2),
             nn.Linear(layer, layer),
             nn.ReLU(),
             
-            nn.Linear(layer, layer),
-            nn.ReLU(),
-            nn.Linear(layer, layer),
-            nn.ReLU(),
-            nn.Dropout(p=0.2),
-            nn.Linear(layer, layer),
-            nn.ReLU(),
+            # nn.Linear(layer, layer),
+            # nn.ReLU(),
+            # nn.Linear(layer, layer),
+            # nn.ReLU(),
+            # nn.Dropout(p=0.2),
+            # nn.Linear(layer, layer),
+            # nn.ReLU(),
             # nn.Dropout(p=0.3),
-            nn.Linear(layer, layer),
-            nn.ReLU(),
+            # nn.Linear(layer, layer),
+            # nn.ReLU(),
             nn.Linear(layer, output))
         # Apply weight initialization
         self._initialize_weights()
@@ -410,6 +410,7 @@ class ProjectAgent:
         return torch.argmax(Q_sample).item()
     
     def act(self, observation, use_random=False):
+        observation = np.sign(observation)*np.log(1+np.abs(observation))
         if self.deterministic == True:
             if self.step > self.epsilon_delay:
                 self.epsilon = max(self.epsilon_min, self.epsilon - self.epsilon_step)
@@ -434,6 +435,8 @@ class ProjectAgent:
   
         X, A, R, Y, D = X.to(self.device, non_blocking=True), A.to(self.device, non_blocking=True), R.to(self.device, non_blocking=True), Y.to(self.device, non_blocking=True), D.to(self.device, non_blocking=True)
         R = torch.sign(R) * torch.log(1 + torch.abs(R))
+        X = torch.sign(X) * torch.log(1 + torch.abs(X))
+        Y = torch.sign(Y) * torch.log(1 + torch.abs(Y))
         self.sampling_time += time.perf_counter() - start_sampling
         
         if self.deterministic == True:
@@ -530,7 +533,7 @@ class ProjectAgent:
         cumulated_mu = 0
 
 
-        state = np.sign(state)*np.log(1+np.abs(state))
+        # state = np.sign(state)*np.log(1+np.abs(state))
 
         while episode < self.max_episode:
 
@@ -547,7 +550,7 @@ class ProjectAgent:
             # Step
             
             next_state, reward, done, trunc, _ = env.step(action)
-            next_state = np.sign(next_state)*np.log(1+np.abs(next_state))
+            # next_state = np.sign(next_state)*np.log(1+np.abs(next_state))
             env_start = time.perf_counter()
             self.memory.append(state , action, reward,next_state, trunc) # ,episode
             env_duration += time.perf_counter() - env_start
@@ -602,7 +605,7 @@ class ProjectAgent:
                 self.batch_time = 0
                 env_duration = 0
                 state, _ = env.reset()
-                state = np.sign(state)*np.log(1+np.abs(state))
+                # state = np.sign(state)*np.log(1+np.abs(state))
                 episode_return.append(episode_cum_reward)
                 var_return.append(cumulated_var)
 
@@ -622,7 +625,7 @@ class ProjectAgent:
 
     def save(self, path):
         os.makedirs(path, exist_ok=True)  # Create the directory if it doesn't exist
-        torch.save(self.model_policy.state_dict(), os.path.join(path, "model.pth"))
+        torch.save(self.model_policy.state_dict(), os.path.join(path, "new_lr.pth"))
         print(f"Model saved to {os.path.join(path, 'model.pth')}")
 
     def load(self):
