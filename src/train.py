@@ -1,6 +1,6 @@
 from gymnasium.wrappers import TimeLimit
 from env_hiv import HIVPatient
-# from fast_env import FastHIVPatient
+from fast_env import FastHIVPatient
 import random
 import torch
 import torch.nn as nn
@@ -207,14 +207,14 @@ class Stochastic_DQN(nn.Module):
         # print("batch norm", x.shape)
         mu = self.mu_layer(x)
         log_std = self.std_layer(x)
-        std = F.softplus(log_std) + 1e-6
+        std = F.softplus(log_std) 
         # std = torch.exp(log_std) 
         return mu, std
     
     def sample_action(self, x):
         mu, log_std = self(x)
         # print("sample", log_std)
-        std = F.softplus(log_std)+ 1e-6
+        std = F.softplus(log_std)
         # std = torch.exp(log_std) 
         action = mu + torch.randn_like(mu) * std
         return action
@@ -411,6 +411,7 @@ class ProjectAgent:
     
     def act(self, observation, use_random=False):
         observation = np.sign(observation)*np.log(1+np.abs(observation))
+        # print(self.deterministic, use_random, self.gradient_steps)
         if self.deterministic == True:
             if self.step > self.epsilon_delay:
                 self.epsilon = max(self.epsilon_min, self.epsilon - self.epsilon_step)
@@ -421,10 +422,12 @@ class ProjectAgent:
                 action = self.greedy_action(observation)           
             return action
         else:
-            if self.gradient_steps == 0:
+            if self.gradient_steps == 0 and use_random==True:
+                print("pas bayesian")
                 action = env.action_space.sample()
                 return action
             else:
+                # print("Bayesian")
                 action = self.Bayesian_TS(observation)
                 return action  
         
@@ -626,10 +629,10 @@ class ProjectAgent:
     def save(self, path):
         os.makedirs(path, exist_ok=True)  # Create the directory if it doesn't exist
         torch.save(self.model_policy.state_dict(), os.path.join(path, "new_lr.pth"))
-        print(f"Model saved to {os.path.join(path, 'model.pth')}")
+        print(f"Model saved to {os.path.join(path, 'new_lr.pth')}")
 
     def load(self):
-        file_path = os.path.join(os.getcwd(), 'src/policy', 'Deep_qn_1st_stochastic.pth')
+        file_path = os.path.join(os.getcwd(), 'src/policy', 'new_lr.pth')
         print(file_path)
 
         self.model_policy.load_state_dict(torch.load(file_path, map_location=torch.device('cpu')))
