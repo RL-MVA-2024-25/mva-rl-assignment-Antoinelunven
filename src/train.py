@@ -1,6 +1,6 @@
 from gymnasium.wrappers import TimeLimit
-from env_hiv import HIVPatient
-# from fast_env import FastHIVPatient
+# from env_hiv import HIVPatient
+from fast_env import FastHIVPatient
 import random
 import torch
 import torch.nn as nn
@@ -163,34 +163,28 @@ class Stochastic_DQN(nn.Module):
         self.fc = nn.Sequential(
             nn.Linear(input, layer),
             nn.ReLU(),
-            # nn.LayerNorm(layer),
             nn.Linear(layer, layer),
             nn.ReLU(),
-            # nn.LayerNorm(layer),
+            # nn.Dropout(p = 0.2),
             nn.Linear(layer, layer),
             nn.ReLU(),
-            # nn.BatchNorm1d(layer),
             # nn.Linear(layer, layer),
             # nn.ReLU(),
-            # nn.BatchNorm1d(layer),
             nn.Linear(layer, layer),
             nn.ReLU(),
+            # nn.Dropout(p = 0.2),
             # nn.Linear(layer, 512),
             # nn.ReLU(),
 
             nn.Linear(layer, layer),
             nn.ReLU(),
-            # nn.LayerNorm(layer),
             
             nn.Linear(layer, layer),
             nn.ReLU(),
-            # nn.LayerNorm(layer),
             nn.Linear(layer, layer),
             nn.ReLU(),
-            # nn.LayerNorm(layer),
             # nn.Linear(layer, layer),
             # nn.ReLU(),
-            # nn.LayerNorm(layer),
             )
         self.mu_layer = nn.Linear(layer, output)
         self.std_layer = nn.Linear(layer, output)
@@ -212,9 +206,8 @@ class Stochastic_DQN(nn.Module):
         return mu, std
     
     def sample_action(self, x):
-        mu, log_std = self(x)
+        mu, std = self(x)
         # print("sample", log_std)
-        std = F.softplus(log_std)
         # std = torch.exp(log_std) 
         action = mu + torch.randn_like(mu) * std
         return action
@@ -300,8 +293,8 @@ class ReplayBuffer:
         return len(self.data)
 
 
-env = TimeLimit(env=HIVPatient(domain_randomization=False), max_episode_steps=200)  
-# env = TimeLimit(env=FastHIVPatient(domain_randomization=False), max_episode_steps=200)  
+# env = TimeLimit(env=HIVPatient(domain_randomization=False), max_episode_steps=200)  
+env = TimeLimit(env=FastHIVPatient(domain_randomization=False), max_episode_steps=200)  
 
 # The time wrapper limits the number of steps in an episode at 200.
 # Now is the floor is yours to implement the agent and train it.
@@ -325,8 +318,8 @@ class ProjectAgent:
           'max_gradient_steps' : 8,
           'epsilon_seuil' : 0.25,
           'deterministic' : False,
-          'episode_seuil' : 30,
-          'explore_episodes' : 80,
+          'episode_seuil' : 20,
+          'explore_episodes' : 35,
           'patience_lr' : 7,
           'udpate_target_freq' : 400}
     dqn_network_deterministic = Deterministic_DQN()
@@ -456,12 +449,11 @@ class ProjectAgent:
                 loss = self.criterion(QXA, update.unsqueeze(1))
         else:
             if double_dqn :
-                pass
-                # next_actions = self.model_policy_sto_der(Y).argmax(dim=1)  # Actions with the highest Q-value
-                # QY_next = self.model_target_sto_der(Y).gather(1, next_actions.unsqueeze(1)).squeeze(1).detach()
-                # update = R + self.gamma * QY_next * (1 - D)
-                # QXA = self.model_policy_sto_der(X).gather(1, A.to(torch.long).unsqueeze(1)).squeeze(1)
-                # loss = self.criterion(QXA, update.unsqueeze(1).squeeze(1))
+                next_actions = self.model_policy.sample_action(Y).argmax(1, keepdim=True)
+                QYmax = self.model_target.sample_action(Y).gather(1, next_actions).squeeze(1).detach()
+                update = R + (1 - D) * self.gamma * QYmax
+                QXA = self.model_policy.sample_action(X).gather(1, A.to(torch.long).unsqueeze(1))
+                loss = self.criterion(QXA, update.unsqueeze(1))
             else:
                 QYmax = self.model_target.sample_action(Y).max(1)[0].detach()
                 update = torch.addcmul(R, 1-D, QYmax, value=self.gamma)
@@ -530,7 +522,7 @@ class ProjectAgent:
         state, _ = env.reset()
         episode_cum_reward = 0
         best_score = 0
-        env_duration = 0
+        # env_duration = 0
         
         cumulated_var = 0
         cumulated_mu = 0
@@ -554,13 +546,14 @@ class ProjectAgent:
             
             next_state, reward, done, trunc, _ = env.step(action)
             # next_state = np.sign(next_state)*np.log(1+np.abs(next_state))
-            env_start = time.perf_counter()
+            # env_start = time.perf_counter()
             self.memory.append(state , action, reward,next_state, trunc) # ,episode
-            env_duration += time.perf_counter() - env_start
+            # env_duration += time.perf_counter() - env_start
             episode_cum_reward += reward
             
             cumulated_var += self.var
             cumulated_mu += self.mu
+            # print("cumulated_var, cumulated_mu", cumulated_var.item(), cumulated_mu.item())
             # Train
             if trunc == True:
                 self.gradient_steps_calculation(episode)
@@ -583,7 +576,7 @@ class ProjectAgent:
                     
             if len(self.memory) > self.batch_size:    
                 for i in range(self.gradient_steps):
-                    self.gradient_step(double_dqn=False)
+                    self.gradient_step(double_dqn=True)
             
 
             if self.step % self.update_target_frequency  == 0:
@@ -591,6 +584,25 @@ class ProjectAgent:
 
             if done or trunc :           
                 episode += 1
+                episode_return.append(episode_cum_reward)
+                var_return.append(cumulated_var)
+                if episode > self.episode_seuil :
+
+                    self.model_policy.eval()
+                    validation_score_hiv = evaluate_HIV(agent=self, nb_episode=2)
+                    validation_score_population = evaluate_HIV_population(agent=self, nb_episode=4)
+                    self.model_policy.train()
+
+                    if validation_score_hiv + validation_score_population > best_score:
+                        best_score = validation_score_hiv + validation_score_population
+                        self.save("policy")
+                else:
+                    validation_score_hiv = 0
+                    validation_score_population = 0
+                    if episode_cum_reward > best_score:
+                        best_score = episode_cum_reward
+                        self.save("policy")
+
                 if self.deterministic:
                     epsilon_or_variance = f"Epsilon {self.epsilon:6.4f} | "
                 else:
@@ -598,9 +610,12 @@ class ProjectAgent:
                 torch.cuda.synchronize()
                 print(f"Episode {episode} | ",
                     epsilon_or_variance,
-                    f"Episode return {episode_cum_reward:.2e} | ",                    
+                    f"Ep return {episode_cum_reward:.2e} | ",   
+                    f"HIV {validation_score_hiv:.2e} | ",
+                    f"Population {validation_score_population:.2e} | ",                 
                     f"Episode time {(time.perf_counter() - self.episode_time):1.1f} | ",
                     f"Gradient steps {self.gradient_steps}",
+                    
                     sep='')
                 self.gradient_time = 0
                 self.sampling_time = 0
@@ -609,15 +624,12 @@ class ProjectAgent:
                 env_duration = 0
                 state, _ = env.reset()
                 # state = np.sign(state)*np.log(1+np.abs(state))
-                episode_return.append(episode_cum_reward)
-                var_return.append(cumulated_var)
 
-                if episode_cum_reward > best_score:
-                    
-                    best_score = episode_cum_reward
-                    self.save("policy")
+
+
                 episode_cum_reward = 0
                 cumulated_var = 0
+                cumulated_mu = 0
 
             else:
                 state = next_state
