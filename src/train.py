@@ -1,6 +1,6 @@
 from gymnasium.wrappers import TimeLimit
 from env_hiv import HIVPatient
-# from fast_env import FastHIVPatient
+from fast_env import FastHIVPatient
 import random
 import torch
 import torch.nn as nn
@@ -293,8 +293,8 @@ class ReplayBuffer:
         return len(self.data)
 
 
-env = TimeLimit(env=HIVPatient(domain_randomization=False), max_episode_steps=200)  
-# env = TimeLimit(env=FastHIVPatient(domain_randomization=False), max_episode_steps=200)  
+# env = TimeLimit(env=HIVPatient(domain_randomization=False), max_episode_steps=200)  
+env = TimeLimit(env=FastHIVPatient(domain_randomization=False), max_episode_steps=200)  
 
 # The time wrapper limits the number of steps in an episode at 200.
 # Now is the floor is yours to implement the agent and train it.
@@ -417,6 +417,7 @@ class ProjectAgent:
         else:
             if use_random == False :
                 action = self.Bayesian_TS(observation)
+                print("bayesian")
                 return action
             if use_random==True:
                 action = env.action_space.sample()
