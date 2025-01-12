@@ -132,8 +132,8 @@ class Deterministic_DQN(nn.Module):
             nn.Linear(layer, layer),
             nn.ReLU(),
             # nn.Dropout(p=0.3),
-            # nn.Linear(layer, layer),
-            # nn.ReLU(),
+            nn.Linear(layer, layer),
+            nn.ReLU(),
             nn.Linear(layer, output)
             )
         # Apply weight initialization
@@ -295,7 +295,7 @@ class ReplayBuffer:
 
 
 env = TimeLimit(env=HIVPatient(domain_randomization=False), max_episode_steps=200)  
-# env = TimeLimit(env=FastHIVPatient(domain_randomization=False), max_episode_steps=200)  
+# env = TimeLimit(env=FastHIVPatient(domain_randomization=True), max_episode_steps=200)  
 
 # The time wrapper limits the number of steps in an episode at 200.
 # Now is the floor is yours to implement the agent and train it.
@@ -307,7 +307,7 @@ env = TimeLimit(env=HIVPatient(domain_randomization=False), max_episode_steps=20
 class ProjectAgent:
     config = {
           'learning_rate': 0.0008,
-          'gamma': 0.98,
+          'gamma': 0.99,
           'buffer_size': 1000000,
           'epsilon_min': 0.01,
           'epsilon_max': 1,
@@ -317,7 +317,7 @@ class ProjectAgent:
           'max_episode': 400,
           'nb_sample' : 15,
           'max_gradient_steps' : 8,
-          'epsilon_seuil' : 0.25,
+          'epsilon_seuil' : 0.2,
           'deterministic' : True,
           'episode_seuil' : 40,
           'explore_episodes' : 150,
@@ -607,8 +607,8 @@ class ProjectAgent:
                 if best_score > 8000000000 :  #5000000000
 
                     self.model_policy.eval()
-                    validation_score_hiv = evaluate_HIV(agent=self, nb_episode=3)
-                    validation_score_population = evaluate_HIV_population(agent=self, nb_episode=10)
+                    validation_score_hiv = evaluate_HIV(agent=self, nb_episode=5)
+                    validation_score_population = evaluate_HIV_population(agent=self, nb_episode=20)
                     self.model_policy.train()
 
                     if validation_score_hiv + validation_score_population > best_score:
