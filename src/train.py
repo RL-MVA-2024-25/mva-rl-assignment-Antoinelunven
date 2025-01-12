@@ -1,6 +1,6 @@
 from gymnasium.wrappers import TimeLimit
 from env_hiv import HIVPatient
-from fast_env import FastHIVPatient
+# from fast_env import FastHIVPatient
 import random
 import torch
 import torch.nn as nn
@@ -132,8 +132,8 @@ class Deterministic_DQN(nn.Module):
             nn.Linear(layer, layer),
             nn.ReLU(),
             # nn.Dropout(p=0.3),
-            # nn.Linear(layer, layer),
-            # nn.ReLU(),
+            nn.Linear(layer, layer),
+            nn.ReLU(),
             nn.Linear(layer, output))
         # Apply weight initialization
         self._initialize_weights()
@@ -293,8 +293,8 @@ class ReplayBuffer:
         return len(self.data)
 
 
-# env = TimeLimit(env=HIVPatient(domain_randomization=False), max_episode_steps=200)  
-env = TimeLimit(env=FastHIVPatient(domain_randomization=False), max_episode_steps=200)  
+env = TimeLimit(env=HIVPatient(domain_randomization=False), max_episode_steps=200)  
+# env = TimeLimit(env=FastHIVPatient(domain_randomization=False), max_episode_steps=200)  
 
 # The time wrapper limits the number of steps in an episode at 200.
 # Now is the floor is yours to implement the agent and train it.
@@ -404,7 +404,6 @@ class ProjectAgent:
     
     def act(self, observation, use_random=False):
         observation = np.sign(observation)*np.log(1+np.abs(observation))
-        print("use", use_random)
         if self.deterministic == True:
             if use_random == True:
                 if self.step > self.epsilon_delay:
@@ -415,7 +414,6 @@ class ProjectAgent:
                 else:
                     action = self.greedy_action(observation)   
             else:
-                print("epsilon greedy right")
                 action = self.greedy_action(observation)           
             return action
         else:
@@ -557,9 +555,9 @@ class ProjectAgent:
 
             # Observation vs exploitation
             if self.deterministic == True:
-                action = self.act(state)
+                action = self.act(state, use_random=use_random)
             else:
-                action = self.act(state,  use_random=use_random)
+                action = self.act(state, use_random=use_random)
             
             # Step
             
@@ -666,7 +664,7 @@ class ProjectAgent:
         file_path = os.path.join(os.getcwd(), 'src/policy', 'new_lr.pth')
         print(file_path)
 
-        self.model_policy.load_state_dict(torch.load(file_path, map_location=torch.device('cuda')))
+        self.model_policy.load_state_dict(torch.load(file_path, map_location=torch.device('cpu'))) #cuda
         self.model_policy.eval()
         print(f"Model loaded from {file_path}")
         return 
