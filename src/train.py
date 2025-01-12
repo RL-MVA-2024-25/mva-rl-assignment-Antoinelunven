@@ -132,10 +132,10 @@ class Deterministic_DQN(nn.Module):
             nn.Linear(layer, layer),
             nn.ReLU(),
             # nn.Dropout(p=0.3),
-            nn.Linear(layer, layer),
+            # nn.Linear(layer, layer),
             # nn.ReLU(),
-            # nn.Linear(layer, output)
-            ),
+            nn.Linear(layer, output)
+            )
         # Apply weight initialization
         self._initialize_weights()
 
