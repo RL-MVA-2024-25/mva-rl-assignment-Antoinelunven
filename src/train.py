@@ -1,6 +1,6 @@
 from gymnasium.wrappers import TimeLimit
-from env_hiv import HIVPatient
-# from fast_env import FastHIVPatient
+# from env_hiv import HIVPatient
+from fast_env import FastHIVPatient
 import random
 import torch
 import torch.nn as nn
@@ -124,13 +124,13 @@ class Deterministic_DQN(nn.Module):
             nn.Linear(layer, layer),
             nn.ReLU(),
             
-            # nn.Linear(layer, layer),
-            # nn.ReLU(),
-            # nn.Linear(layer, layer),
-            # nn.ReLU(),
+            nn.Linear(layer, layer),
+            nn.ReLU(),
+            nn.Linear(layer, layer),
+            nn.ReLU(),
             # nn.Dropout(p=0.2),
-            # nn.Linear(layer, layer),
-            # nn.ReLU(),
+            nn.Linear(layer, layer),
+            nn.ReLU(),
             # nn.Dropout(p=0.3),
             # nn.Linear(layer, layer),
             # nn.ReLU(),
@@ -168,8 +168,8 @@ class Stochastic_DQN(nn.Module):
             # nn.Dropout(p = 0.2),
             nn.Linear(layer, layer),
             nn.ReLU(),
-            # nn.Linear(layer, layer),
-            # nn.ReLU(),
+            nn.Linear(layer, layer),
+            nn.ReLU(),
             nn.Linear(layer, layer),
             nn.ReLU(),
             # nn.Dropout(p = 0.2),
@@ -183,8 +183,8 @@ class Stochastic_DQN(nn.Module):
             nn.ReLU(),
             nn.Linear(layer, layer),
             nn.ReLU(),
-            # nn.Linear(layer, layer),
-            # nn.ReLU(),
+            nn.Linear(layer, layer),
+            nn.ReLU(),
             )
         self.mu_layer = nn.Linear(layer, output)
         self.std_layer = nn.Linear(layer, output)
@@ -293,8 +293,8 @@ class ReplayBuffer:
         return len(self.data)
 
 
-env = TimeLimit(env=HIVPatient(domain_randomization=False), max_episode_steps=200)  
-# env = TimeLimit(env=FastHIVPatient(domain_randomization=False), max_episode_steps=200)  
+# env = TimeLimit(env=HIVPatient(domain_randomization=False), max_episode_steps=200)  
+env = TimeLimit(env=FastHIVPatient(domain_randomization=False), max_episode_steps=200)  
 
 # The time wrapper limits the number of steps in an episode at 200.
 # Now is the floor is yours to implement the agent and train it.
@@ -305,23 +305,23 @@ env = TimeLimit(env=HIVPatient(domain_randomization=False), max_episode_steps=20
 
 class ProjectAgent:
     config = {
-          'learning_rate': 0.001,
+          'learning_rate': 0.0008,
           'gamma': 0.98,
           'buffer_size': 1000000,
           'epsilon_min': 0.01,
           'epsilon_max': 1,
-          'epsilon_decay_period': 25000,
-          'epsilon_delay_decay': 3000,
-          'batch_size': 200,
+          'epsilon_decay_period': 41000,
+          'epsilon_delay_decay': 5000,
+          'batch_size': 2000,
           'max_episode': 400,
           'nb_sample' : 15,
           'max_gradient_steps' : 8,
           'epsilon_seuil' : 0.25,
-          'deterministic' : False,
-          'episode_seuil' : 20,
-          'explore_episodes' : 35,
+          'deterministic' : True,
+          'episode_seuil' : 40,
+          'explore_episodes' : 150,
           'patience_lr' : 7,
-          'udpate_target_freq' : 400}
+          'udpate_target_freq' : 500}
     dqn_network_deterministic = Deterministic_DQN()
     dqn_network_stochastic = Stochastic_DQN()
     # dqn_network = LSTMunit(input_size = env.observation_space.shape[0], hidden_size = 200, num_layers= 1, device=dev)
@@ -415,14 +415,16 @@ class ProjectAgent:
                 action = self.greedy_action(observation)           
             return action
         else:
-            if self.gradient_steps == 0 and use_random==True:
-                print("pas bayesian")
+            if use_random == False :
+                action = self.Bayesian_TS(observation)
+                return action
+            if use_random==True:
                 action = env.action_space.sample()
                 return action
-            else:
-                # print("Bayesian")
-                action = self.Bayesian_TS(observation)
-                return action  
+            # else:
+            #     # print("Bayesian")
+            #     action = self.Bayesian_TS(observation)
+            #     return action  
         
     def gradient_step(self, double_dqn): #, step, episode
         start_sampling = time.perf_counter()
@@ -502,9 +504,12 @@ class ProjectAgent:
 
             elif self.epsilon > self.epsilon_seuil:
                 scale = np.exp(-k * (self.epsilon - self.epsilon_seuil) / (1 - self.epsilon_seuil))
+                self.gradient_steps =  int(min_steps + (max_steps - min_steps) * scale)
             else:
-                scale = 1- np.exp(-k * (self.epsilon - self.epsilon_min) / (self.epsilon_seuil - self.epsilon_min))
-            self.gradient_steps =  int(min_steps + (max_steps - min_steps) * scale)
+                if self.compteur_stop % self.patience == 0  and self.compteur_stop !=0 and self.gradient_steps !=1:
+                    self.gradient_steps = self.gradient_steps -1
+            #     scale = 1- np.exp(-k * (self.epsilon - self.epsilon_min) / (self.epsilon_seuil - self.epsilon_min))
+            # self.gradient_steps =  int(min_steps + (max_steps - min_steps) * scale)
         else:
             if episode < self.explore_episodes:
                 self.gradient_steps = 0
@@ -536,11 +541,17 @@ class ProjectAgent:
                 if trunc == True :
                     self.episode_time = time.perf_counter()
                     torch.cuda.synchronize()
+            if episode <= self.explore_episodes:
+                use_random = True
+            else:
+                use_random = False
+
+
             # Observation vs exploitation
             if self.deterministic == True:
                 action = self.act(state)
             else:
-                action = self.act(state)
+                action = self.act(state,  use_random=use_random)
             
             # Step
             
@@ -576,7 +587,7 @@ class ProjectAgent:
                     
             if len(self.memory) > self.batch_size:    
                 for i in range(self.gradient_steps):
-                    self.gradient_step(double_dqn=True)
+                    self.gradient_step(double_dqn=False)
             
 
             if self.step % self.update_target_frequency  == 0:
@@ -586,11 +597,11 @@ class ProjectAgent:
                 episode += 1
                 episode_return.append(episode_cum_reward)
                 var_return.append(cumulated_var)
-                if episode > self.episode_seuil :
+                if best_score > 8000000000 :  #5000000000
 
                     self.model_policy.eval()
-                    validation_score_hiv = evaluate_HIV(agent=self, nb_episode=2)
-                    validation_score_population = evaluate_HIV_population(agent=self, nb_episode=4)
+                    validation_score_hiv = evaluate_HIV(agent=self, nb_episode=3)
+                    validation_score_population = evaluate_HIV_population(agent=self, nb_episode=10)
                     self.model_policy.train()
 
                     if validation_score_hiv + validation_score_population > best_score:
