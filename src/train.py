@@ -404,20 +404,24 @@ class ProjectAgent:
     
     def act(self, observation, use_random=False):
         observation = np.sign(observation)*np.log(1+np.abs(observation))
-        # print(self.deterministic, use_random, self.gradient_steps)
+        print("use", use_random)
         if self.deterministic == True:
-            if self.step > self.epsilon_delay:
-                self.epsilon = max(self.epsilon_min, self.epsilon - self.epsilon_step)
-            if np.random.rand() < self.epsilon:
-                action = env.action_space.sample()
-                return action
+            if use_random == True:
+                if self.step > self.epsilon_delay:
+                    self.epsilon = max(self.epsilon_min, self.epsilon - self.epsilon_step)
+                if np.random.rand() < self.epsilon:
+                    action = env.action_space.sample()
+                    return action
+                else:
+                    action = self.greedy_action(observation)   
             else:
+                print("epsilon greedy right")
                 action = self.greedy_action(observation)           
             return action
         else:
             if use_random == False :
                 action = self.Bayesian_TS(observation)
-                print("bayesian")
+                
                 return action
             if use_random==True:
                 action = env.action_space.sample()
@@ -542,10 +546,13 @@ class ProjectAgent:
                 if trunc == True :
                     self.episode_time = time.perf_counter()
                     torch.cuda.synchronize()
-            if episode <= self.explore_episodes:
-                use_random = True
+            if self.deterministic == False:
+                if episode <= self.explore_episodes:
+                    use_random = True
+                else:
+                    use_random = False
             else:
-                use_random = False
+                use_random = True
 
 
             # Observation vs exploitation
@@ -659,7 +666,7 @@ class ProjectAgent:
         file_path = os.path.join(os.getcwd(), 'src/policy', 'new_lr.pth')
         print(file_path)
 
-        self.model_policy.load_state_dict(torch.load(file_path, map_location=torch.device('cpu')))
+        self.model_policy.load_state_dict(torch.load(file_path, map_location=torch.device('cuda')))
         self.model_policy.eval()
         print(f"Model loaded from {file_path}")
         return 
